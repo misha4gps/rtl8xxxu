@@ -7656,7 +7656,7 @@ error_out:
 	return ret;
 }
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0)) || defined(RHEL96)
 static void rtl8xxxu_stop(struct ieee80211_hw *hw, bool suspend)
 #else
 static void rtl8xxxu_stop(struct ieee80211_hw *hw)
