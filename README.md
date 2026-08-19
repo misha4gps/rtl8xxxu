@@ -52,6 +52,8 @@ Tested with RTL8192EU on the following linux distros and it works fine.
 
 * Arch Linux  (kernel version: 6.12.12-1-lts / 6.6.62-1-lts)
 
+* AlmaLinux 10.2 (kernel version: 6.12.0-211.7.3.el10_2)
+
 * Debian 11.10 (kernel version: 5.10.0-33-amd64 / 6.1.0-0.deb11.21-amd64)
 
 * Linux Mint 20.3 (kernel version: 5.15.0-124-generic)
