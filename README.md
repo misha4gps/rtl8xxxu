@@ -46,7 +46,7 @@ RTL8723AU | RTL8723BU
 
 ### Note
 
-Supported linux kernel version: 5.5.x ~ 6.14.x
+Supported linux kernel version: 5.5.x ~ 6.17.x
 
 Tested with RTL8192EU on the following linux distros and it works fine.
 
