@@ -9,6 +9,9 @@ endif
 ifeq ($(shell test $(RHEL_VER) -ge 0906; echo $$?),0)
 EXTRA_CFLAGS += -DRHEL96
 endif
+ifeq ($(shell test $(RHEL_VER) -ge 1002; echo $$?),0)
+EXTRA_CFLAGS += -DRHEL102
+endif
 endif
 
 ifneq ($(KERNELRELEASE),)
