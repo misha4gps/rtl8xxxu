@@ -42,7 +42,6 @@ clean:
 install:
 	strip -g rtl8xxxu_git.ko
 	@install -Dvm 644 -t $(MODDIR) rtl8xxxu_git.ko
-	@install -Dvm 644 -t /etc/modprobe.d rtl8xxxu_git.conf
 	depmod -a $(KVER)
 	
 install_fw:
@@ -65,7 +64,6 @@ endif
 
 uninstall:
 	@rm -vf $(MODDIR)/rtl8xxxu_git.ko
-	@rm -vf /etc/modprobe.d/rtl8xxxu_git.conf
 	@rmdir --ignore-fail-on-non-empty $(MODDIR) || true
 	depmod -a $(KVER)
 
