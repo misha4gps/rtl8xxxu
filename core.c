@@ -4514,12 +4514,19 @@ int rtl8xxxu_get_antenna(struct ieee80211_hw *hw, int radio_idx, u32 *tx_ant,
 	return 0;
 }
 
+#define RTL8XXXU_TIM_UPDATE_DELAY_MS	10
+
 static int rtl8xxxu_set_tim(struct ieee80211_hw *hw, struct ieee80211_sta *sta,
 			    bool set)
 {
 	struct rtl8xxxu_priv *priv = hw->priv;
 
-	schedule_delayed_work(&priv->update_beacon_work, 0);
+	/*
+	 * TIM changes come in bursts. Delay the download a bit so they
+	 * get merged into one beacon update.
+	 */
+	schedule_delayed_work(&priv->update_beacon_work,
+			      msecs_to_jiffies(RTL8XXXU_TIM_UPDATE_DELAY_MS));
 
 	return 0;
 }
@@ -5702,42 +5709,72 @@ error:
 	dev_kfree_skb(skb);
 }
 
+/*
+ * A beacon download that lands a few ms before TBTT can be dropped by the
+ * chip: the URB completes but BCN_VALID never gets set. Downloading the
+ * beacon again after that works, so retry a few times.
+ */
+#define RTL8XXXU_BCN_DL_ATTEMPTS	5
+#define RTL8XXXU_BCN_VALID_TIMEOUT_US	5000
+
 static void rtl8xxxu_send_beacon_frame(struct ieee80211_hw *hw,
 				       struct ieee80211_vif *vif)
 {
 	struct rtl8xxxu_priv *priv = hw->priv;
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)) || defined(RHEL95)
-	struct sk_buff *skb = ieee80211_beacon_get(hw, vif, 0);
-#else
-	struct sk_buff *skb = ieee80211_beacon_get(hw, vif);
-#endif
 	struct device *dev = &priv->udev->dev;
-	int retry;
+	struct sk_buff *skb, *tx_skb;
+	int attempt;
+	int ret;
 	u8 val8;
 
-	/* BCN_VALID, write 1 to clear, cleared by SW */
-	val8 = rtl8xxxu_read8(priv, REG_TDECTRL + 2);
-	val8 |= BIT_BCN_VALID >> 16;
-	rtl8xxxu_write8(priv, REG_TDECTRL + 2, val8);
+	/*
+	 * Get the beacon once: ieee80211_beacon_get() advances the CSA and
+	 * DTIM counters, so retries send copies of the same frame.
+	 */
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 0, 0)) || defined(RHEL95)
+	skb = ieee80211_beacon_get(hw, vif, 0);
+#else
+	skb = ieee80211_beacon_get(hw, vif);
+#endif
+	if (!skb)
+		return;
 
-	/* SW_BCN_SEL - Port0 */
-	val8 = rtl8xxxu_read8(priv, REG_DWBCN1_CTRL_8723B + 2);
-	val8 &= ~(BIT_SW_BCN_SEL >> 16);
-	rtl8xxxu_write8(priv, REG_DWBCN1_CTRL_8723B + 2, val8);
+	for (attempt = 0; attempt < RTL8XXXU_BCN_DL_ATTEMPTS; attempt++) {
+		tx_skb = skb_copy(skb, GFP_KERNEL);
+		if (!tx_skb) {
+			dev_kfree_skb(skb);
+			dev_err(dev, "%s: Failed to copy beacon\n", __func__);
+			return;
+		}
 
-	if (skb)
-		rtl8xxxu_tx(hw, NULL, skb);
-
-	retry = 100;
-	do {
+		/* BCN_VALID, write 1 to clear, cleared by SW */
 		val8 = rtl8xxxu_read8(priv, REG_TDECTRL + 2);
-		if (val8 & (BIT_BCN_VALID >> 16))
-			break;
-		usleep_range(10, 20);
-	} while (--retry);
+		val8 |= BIT_BCN_VALID >> 16;
+		rtl8xxxu_write8(priv, REG_TDECTRL + 2, val8);
 
-	if (!retry)
-		dev_err(dev, "%s: Failed to read beacon valid bit\n", __func__);
+		/* SW_BCN_SEL - Port0 */
+		val8 = rtl8xxxu_read8(priv, REG_DWBCN1_CTRL_8723B + 2);
+		val8 &= ~(BIT_SW_BCN_SEL >> 16);
+		rtl8xxxu_write8(priv, REG_DWBCN1_CTRL_8723B + 2, val8);
+
+		rtl8xxxu_tx(hw, NULL, tx_skb);
+
+		ret = read_poll_timeout(rtl8xxxu_read8, val8,
+					val8 & (BIT_BCN_VALID >> 16),
+					200, RTL8XXXU_BCN_VALID_TIMEOUT_US, false,
+					priv, REG_TDECTRL + 2);
+		if (!ret) {
+			if (attempt)
+				dev_dbg(dev, "%s: beacon valid after %d retries\n",
+					__func__, attempt);
+			dev_kfree_skb(skb);
+			return;
+		}
+	}
+
+	dev_kfree_skb(skb);
+	dev_err(dev, "%s: Failed to read beacon valid bit after %d attempts\n",
+		__func__, attempt);
 }
 
 static void rtl8xxxu_update_beacon_work_callback(struct work_struct *work)
